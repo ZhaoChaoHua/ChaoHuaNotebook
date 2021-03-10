@@ -1,9 +1,7 @@
 import pyglet.gl as gl
 import numpy as np
-
 import numpy.matlib
 import matplotlib.colors as mcol
-import matplotlib.pyplot as plt
 # from pyglet import shapes
 import pyglet
 
