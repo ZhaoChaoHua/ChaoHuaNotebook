@@ -2,7 +2,6 @@ import pyglet.gl as gl
 import numpy as np
 import numpy.matlib
 import matplotlib.colors as mcol
-# from pyglet import shapes
 import pyglet
 
 # O: Object   e.g. vtsO: vertexes in Object Coordinate System
@@ -571,6 +570,16 @@ class MassSpring:
         self.ke = 0.5 * self.m * (self.vx ** 2 + self.vy ** 2)  # Kinetic energy
         self.energy = self.pe + self.ke  # Energy
 
+        # Learning Data Switch
+        self.get_learning_data = False
+        # LEARNING DATA: [[input_0, output_0], [input_1, output_1],...]
+        # input_i: [vx_last_jump, vy_last_jump, y_last_jump, vx_this_jump, vy_this_jump, y_this_jump]
+        # output: [rad_last_hit]
+        self.learing_data = []
+
+    def turnOnGetLearningData(self):
+        self.get_learning_data = True
+
     def adjustVelocity(self):
         self.pe = self.m * gravity * self.y
         self.ke = self.energy - self.pe
@@ -948,19 +957,19 @@ class NeuralNet:
 
 camera = Camera(scale=130)
 camera.setY(0.0)
-# jumper = MassSpring(camera=camera)
-# g = Ground(l=100,camera=camera)
+jumper = MassSpring(camera=camera)
+g = Ground(l=100,camera=camera)
 # jumper.hold()
-nn = NeuralNet(dimIn=2, dimOut=2, ls=np.array([7, 6, 5]), camera=camera)
+# nn = NeuralNet(dimIn=2, dimOut=2, ls=np.array([7, 6, 5]), camera=camera)
 
 @window.event
 def on_draw():
     gl.glClear(gl.GL_COLOR_BUFFER_BIT)
     gl.glLoadIdentity()
 
-    # jumper.draw()
+    jumper.draw()
     # g.draw()
-    nn.draw()
+    # nn.draw()
 
 t = 0
 def update(dt):
@@ -970,8 +979,8 @@ def update(dt):
     w = 1.
     s = .5*np.sin(2.*np.pi*w*t)+.5
     c = .5*np.cos(2.*np.pi*w*t)+.5
-    nn.setInput(np.array([s, c]))
-    # jumper.update(dstRad=dst, dt=dt*1.0, control=True)
+    # nn.setInput(np.array([s, c]))
+    jumper.update(dstRad=-np.pi/2, dt=dt*1.0, control=True)
     # camera.setX(jumper.x)
 
 
