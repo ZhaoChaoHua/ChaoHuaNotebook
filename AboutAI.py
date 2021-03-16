@@ -576,9 +576,70 @@ class MassSpring:
         # input_i: [vx_last_jump, vy_last_jump, y_last_jump, vx_this_jump, vy_this_jump, y_this_jump]
         # output: [rad_last_hit]
         self.learing_data = []
+        self.vx_last_jump = 0.
+        self.vy_last_jump = 0.
+        self.y_last_jump = 0.
+        self.vx_this_jump = 0.
+        self.vy_this_jump = 0.
+        self.y_this_jump = 0.
 
     def turnOnGetLearningData(self):
         self.get_learning_data = True
+
+    def init(self, x, y, rad, vx, vy):
+        self.state = 0
+        self.x = x
+        self.y = max(self.l, y)
+        self.rad = rad
+        self.vx = vx
+        self.vy = vy
+
+    # Collecting learning data
+    # input: [vx_last, vy_last, y_last, vx_this, vy_this, y_this]
+    # output: [rad]
+    def sampling(self, num=500, dt=0.01):
+        y_mean = 2.
+        y_range = 1.
+        vx_mean = 0.
+        vx_range = 3.
+        vy_mean = 0.
+        vy_range = 2.
+        rad_mean = -np.pi*.5
+        rad_range = -np.pi/3.
+        y = y_mean + 2.*(np.random.random()-.5)*y_range
+        vx = vx_mean + 2.*(np.random.random()-.5)*vx_range
+        vy = vy_mean + 2.*(np.random.random()-.5)*vy_range
+        rad = rad_mean + 2.*(np.random.random()-.5)*rad_range
+        self.init(0, y, rad, vx, vy)
+        input = [vx, vy, y, 0, 0, 0]
+        output = rad
+        inputData = np.ndarray((6, num))
+        outputData = np.ndarray((1, num))
+
+        state_last = 0
+        state_this = 0
+        i = 0
+        while i < num:
+            self.update(dt=dt, control=False)
+            state_last = state_this
+            state_this = self.state
+            if state_last == 1 and state_this != state_last:
+                input[3:] = [self.vx, self.vy, self.y]
+                inputData[:,i] = input
+                outputData[:,i] = output
+                i += 1
+
+                y = y_mean + 2. * (np.random.random() - .5) * y_range
+                vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
+                vy = vy_mean + 2. * (np.random.random() - .5) * vy_range
+                rad = rad_mean + 2. * (np.random.random() - .5) * rad_range
+                self.init(0, y, rad, vx, vy)
+                input = [vx, vy, y, 0, 0, 0]
+                output = rad
+                i += 1
+        # print(inputData)
+        print(outputData)
+
 
     def adjustVelocity(self):
         self.pe = self.m * gravity * self.y
@@ -617,9 +678,12 @@ class MassSpring:
             self.vec = np.mat([self.x - self.x0, self.y - self.y0]).T
 
             # Condition of changing state
+            # flying -> stop
             if ground(self.x) >= self.y - self.r:
                 self.state = 2
                 self.y = self.r
+
+            # flying -> standing
             if ground(self.x0) >= self.y0:
                 self.state = 1
                 self.y0 = 0
@@ -643,11 +707,13 @@ class MassSpring:
             self.f = self.vec * self.k * (self.l / self.norm_vec - 1.0)
 
             # Condition of changing state
+            # standing -> flying
             if self.norm_vec >= self.l:
                 self.state = 0
                 self.y0 = 0
                 self.adjustVelocity()
 
+            # standing -> stop
             if ground(self.x) >= self.y - self.r:
                 self.state = 2
                 self.y = self.r
@@ -956,7 +1022,7 @@ class NeuralNet:
 
 
 camera = Camera(scale=130)
-camera.setY(0.0)
+camera.setY(1.0)
 jumper = MassSpring(camera=camera)
 g = Ground(l=100,camera=camera)
 # jumper.hold()
@@ -968,21 +1034,75 @@ def on_draw():
     gl.glLoadIdentity()
 
     jumper.draw()
-    # g.draw()
+    g.draw()
     # nn.draw()
 
-t = 0
-def update(dt):
-    # print(jumper.dvrad)
-    global t
-    t += dt
-    w = 1.
-    s = .5*np.sin(2.*np.pi*w*t)+.5
-    c = .5*np.cos(2.*np.pi*w*t)+.5
-    # nn.setInput(np.array([s, c]))
-    jumper.update(dstRad=-np.pi/2, dt=dt*1.0, control=True)
-    # camera.setX(jumper.x)
+# t = 0
+# def update(dt):
+#     # print(jumper.dvrad)
+#     # print(dt)
+#     global t, ctr
+#     t += dt
+#     if t >= 5:
+#         jumper.init(0, 2, 0, -1, 4)
+#         t = 0
+#     if t > 0.5:
+#         ctr = True
+#     # w = 1.
+#     # s = .5*np.sin(2.*np.pi*w*t)+.5
+#     # c = .5*np.cos(2.*np.pi*w*t)+.5
+#     # nn.setInput(np.array([s, c]))
+#     jumper.update(dstRad=-np.pi/3, dt=dt*1.0, control=False)
+#     camera.setX(jumper.x)
+
+# Sampling Learning data
+num = 10
+y_mean = 2.
+y_range = 1.
+vx_mean = 0.
+vx_range = 3.
+vy_mean = 0.
+vy_range = 2.
+rad_mean = -np.pi * .5
+rad_range = -np.pi / 3.
+y = y_mean + 2. * (np.random.random() - .5) * y_range
+vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
+vy = vy_mean + 2. * (np.random.random() - .5) * vy_range
+rad = rad_mean + 2. * (np.random.random() - .5) * rad_range
+jumper.init(0, y, rad, vx, vy)
+input = [vx, vy, y, 0, 0, 0]
+output = rad
+inputData = np.ndarray((6, num))
+outputData = np.ndarray((1, num))
+state_last = 0
+state_this = 0
+i = 0
+def updataSamplingLearningData(dt):
+    global input, output, inputData, outputData, state_last, state_this, i, num
+    jumper.update(dt=dt, control=False)
+    state_last = state_this
+    state_this = jumper.state
+    if state_last == 1 and state_this != state_last and i < num:
+        input[3:] = [jumper.vx, jumper.vy, jumper.y]
+        inputData[:, i] = input
+        outputData[:, i] = output
+        print(input)
+        print(output)
+        i += 1
+        if i == num:
+            np.save('input.npy', inputData)
+            np.save('output.npy', outputData)
+            print('sample ok')
+        y = y_mean + 2. * (np.random.random() - .5) * y_range
+        vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
+        vy = vy_mean + 2. * (np.random.random() - .5) * vy_range
+        rad = rad_mean + 2. * (np.random.random() - .5) * rad_range
+        jumper.init(0, y, rad, vx, vy)
+        input = [vx, vy, y, 0, 0, 0]
+        output = rad
+        state_last=0
+        state_this=0
 
 
-pyglet.clock.schedule_interval(update, 1.0 / 50.0)
+pyglet.clock.schedule_interval(updataSamplingLearningData, 1.0 / 100.0)
 pyglet.app.run()
