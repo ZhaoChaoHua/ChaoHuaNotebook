@@ -1021,88 +1021,98 @@ class NeuralNet:
             x = self.layers[l].getOutput()
 
 
-camera = Camera(scale=130)
-camera.setY(1.0)
-jumper = MassSpring(camera=camera)
-g = Ground(l=100,camera=camera)
-# jumper.hold()
-# nn = NeuralNet(dimIn=2, dimOut=2, ls=np.array([7, 6, 5]), camera=camera)
+t = 0
 
-@window.event
-def on_draw():
-    gl.glClear(gl.GL_COLOR_BUFFER_BIT)
-    gl.glLoadIdentity()
+# Neural network test
+def test_neural():
+    camera = Camera(scale=130)
+    camera.setY(0.0)
+    nn = NeuralNet(dimIn=2, dimOut=2, ls=np.array([7, 6, 5]), camera=camera)
+    @window.event
+    def on_draw():
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+        gl.glLoadIdentity()
 
-    jumper.draw()
-    g.draw()
-    # nn.draw()
+        nn.draw()
 
-# t = 0
-# def update(dt):
-#     # print(jumper.dvrad)
-#     # print(dt)
-#     global t, ctr
-#     t += dt
-#     if t >= 5:
-#         jumper.init(0, 2, 0, -1, 4)
-#         t = 0
-#     if t > 0.5:
-#         ctr = True
-#     # w = 1.
-#     # s = .5*np.sin(2.*np.pi*w*t)+.5
-#     # c = .5*np.cos(2.*np.pi*w*t)+.5
-#     # nn.setInput(np.array([s, c]))
-#     jumper.update(dstRad=-np.pi/3, dt=dt*1.0, control=False)
-#     camera.setX(jumper.x)
+    def update(dt):
+        global t
+        t += dt
+        w = 1.
+        s = .5*np.sin(2.*np.pi*w*t)+.5
+        c = .5*np.cos(2.*np.pi*w*t)+.5
+        nn.setInput(np.array([s, c]))
+    pyglet.clock.schedule_interval(update, 1.0 / 100.0)
+    pyglet.app.run()
+
+# test_neural()
+
 
 # Sampling Learning data
-num = 10
-y_mean = 2.
-y_range = 1.
-vx_mean = 0.
-vx_range = 3.
-vy_mean = 0.
-vy_range = 2.
-rad_mean = -np.pi * .5
-rad_range = -np.pi / 3.
-y = y_mean + 2. * (np.random.random() - .5) * y_range
-vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
-vy = vy_mean + 2. * (np.random.random() - .5) * vy_range
-rad = rad_mean + 2. * (np.random.random() - .5) * rad_range
-jumper.init(0, y, rad, vx, vy)
-input = [vx, vy, y, 0, 0, 0]
-output = rad
-inputData = np.ndarray((6, num))
-outputData = np.ndarray((1, num))
-state_last = 0
-state_this = 0
-i = 0
-def updataSamplingLearningData(dt):
-    global input, output, inputData, outputData, state_last, state_this, i, num
-    jumper.update(dt=dt, control=False)
-    state_last = state_this
-    state_this = jumper.state
-    if state_last == 1 and state_this != state_last and i < num:
-        input[3:] = [jumper.vx, jumper.vy, jumper.y]
-        inputData[:, i] = input
-        outputData[:, i] = output
-        print(input)
-        print(output)
-        i += 1
-        if i == num:
-            np.save('input.npy', inputData)
-            np.save('output.npy', outputData)
-            print('sample ok')
-        y = y_mean + 2. * (np.random.random() - .5) * y_range
-        vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
-        vy = vy_mean + 2. * (np.random.random() - .5) * vy_range
-        rad = rad_mean + 2. * (np.random.random() - .5) * rad_range
-        jumper.init(0, y, rad, vx, vy)
-        input = [vx, vy, y, 0, 0, 0]
-        output = rad
-        state_last=0
-        state_this=0
+def samplingData():
+    camera = Camera(scale=130)
+    camera.setY(1.0)
+    jumper = MassSpring(camera=camera)
+    g = Ground(l=100,camera=camera)
 
+    num = 10
+    y_mean = 2.
+    y_range = 1.
+    vx_mean = 0.
+    vx_range = 3.
+    vy_mean = 0.
+    vy_range = 2.
+    rad_mean = -np.pi * .5
+    rad_range = -np.pi / 3.
+    y = y_mean + 2. * (np.random.random() - .5) * y_range
+    vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
+    vy = vy_mean + 2. * (np.random.random() - .5) * vy_range
+    rad = rad_mean + 2. * (np.random.random() - .5) * rad_range
+    jumper.init(0, y, rad, vx, vy)
+    input = [vx, vy, y, 0, 0, 0]
+    output = rad
+    inputData = np.ndarray((6, num))
+    outputData = np.ndarray((1, num))
+    state_last = 0
+    state_this = 0
+    i = 0
+    @window.event
+    def on_draw():
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+        gl.glLoadIdentity()
 
-pyglet.clock.schedule_interval(updataSamplingLearningData, 1.0 / 100.0)
-pyglet.app.run()
+        jumper.draw()
+        g.draw()
+
+    def updataSamplingLearningData(dt, input, output, inputData, outputData, state_last, state_this, i, num):
+        jumper.update(dt=dt, control=False)
+        state_last = state_this
+        state_this = jumper.state
+        if state_last == 1 and state_this != state_last and i < num:
+            input[3:] = [jumper.vx, jumper.vy, jumper.y]
+            inputData[:, i] = input
+            outputData[:, i] = output
+            print(input)
+            print(output)
+            i += 1
+            if i == num:
+                np.save('input.npy', inputData)
+                np.save('output.npy', outputData)
+                print('sample ok')
+            y = y_mean + 2. * (np.random.random() - .5) * y_range
+            vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
+            vy = vy_mean + 2. * (np.random.random() - .5) * vy_range
+            rad = rad_mean + 2. * (np.random.random() - .5) * rad_range
+            jumper.init(0, y, rad, vx, vy)
+            input = [vx, vy, y, 0, 0, 0]
+            output = rad
+            state_last=0
+            state_this=0
+
+    pyglet.clock.schedule_interval(updataSamplingLearningData,
+                                   input = input, output=output, inputData=inputData, outputData=outputData,
+                                   state_last=state_last,state_this=state_this, i=i, num=num,
+                                   interval=1.0 / 100.0)
+    pyglet.app.run()
+
+samplingData()
