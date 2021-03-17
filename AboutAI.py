@@ -570,22 +570,6 @@ class MassSpring:
         self.ke = 0.5 * self.m * (self.vx ** 2 + self.vy ** 2)  # Kinetic energy
         self.energy = self.pe + self.ke  # Energy
 
-        # Learning Data Switch
-        self.get_learning_data = False
-        # LEARNING DATA: [[input_0, output_0], [input_1, output_1],...]
-        # input_i: [vx_last_jump, vy_last_jump, y_last_jump, vx_this_jump, vy_this_jump, y_this_jump]
-        # output: [rad_last_hit]
-        self.learing_data = []
-        self.vx_last_jump = 0.
-        self.vy_last_jump = 0.
-        self.y_last_jump = 0.
-        self.vx_this_jump = 0.
-        self.vy_this_jump = 0.
-        self.y_this_jump = 0.
-
-    def turnOnGetLearningData(self):
-        self.get_learning_data = True
-
     def init(self, x, y, rad, vx, vy):
         self.state = 0
         self.x = x
@@ -593,53 +577,6 @@ class MassSpring:
         self.rad = rad
         self.vx = vx
         self.vy = vy
-
-    # Collecting learning data
-    # input: [vx_last, vy_last, y_last, vx_this, vy_this, y_this]
-    # output: [rad]
-    def sampling(self, num=500, dt=0.01):
-        y_mean = 2.
-        y_range = 1.
-        vx_mean = 0.
-        vx_range = 3.
-        vy_mean = 0.
-        vy_range = 2.
-        rad_mean = -np.pi*.5
-        rad_range = -np.pi/3.
-        y = y_mean + 2.*(np.random.random()-.5)*y_range
-        vx = vx_mean + 2.*(np.random.random()-.5)*vx_range
-        vy = vy_mean + 2.*(np.random.random()-.5)*vy_range
-        rad = rad_mean + 2.*(np.random.random()-.5)*rad_range
-        self.init(0, y, rad, vx, vy)
-        input = [vx, vy, y, 0, 0, 0]
-        output = rad
-        inputData = np.ndarray((6, num))
-        outputData = np.ndarray((1, num))
-
-        state_last = 0
-        state_this = 0
-        i = 0
-        while i < num:
-            self.update(dt=dt, control=False)
-            state_last = state_this
-            state_this = self.state
-            if state_last == 1 and state_this != state_last:
-                input[3:] = [self.vx, self.vy, self.y]
-                inputData[:,i] = input
-                outputData[:,i] = output
-                i += 1
-
-                y = y_mean + 2. * (np.random.random() - .5) * y_range
-                vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
-                vy = vy_mean + 2. * (np.random.random() - .5) * vy_range
-                rad = rad_mean + 2. * (np.random.random() - .5) * rad_range
-                self.init(0, y, rad, vx, vy)
-                input = [vx, vy, y, 0, 0, 0]
-                output = rad
-                i += 1
-        # print(inputData)
-        print(outputData)
-
 
     def adjustVelocity(self):
         self.pe = self.m * gravity * self.y
@@ -977,9 +914,9 @@ class NeuralNet:
         offsetInputNodeY = .5*(self.dimIn-1) * d
         for i in range(self.dimIn):
             self.inputNode[i] = Circle(x=x-.5*b-offsetX, y=y+i*d-offsetInputNodeY, radius=r,
-                                       s=0., v=.5, camera=camera)
+                                       s=0., v=.5, camera=self.camera)
         for i in range(self.numLs):
-            self.layers[i].initGraph(x=x+b*i-offsetX, y=y, r=r, camera=camera)
+            self.layers[i].initGraph(x=x+b*i-offsetX, y=y, r=r, camera=self.camera)
 
     def calOutput(self, input):
         x = input
@@ -1021,13 +958,13 @@ class NeuralNet:
             x = self.layers[l].getOutput()
 
 
-t = 0
-
+# TEST
 # Neural network test
 def test_neural():
     camera = Camera(scale=130)
     camera.setY(0.0)
     nn = NeuralNet(dimIn=2, dimOut=2, ls=np.array([7, 6, 5]), camera=camera)
+    t = [0]
     @window.event
     def on_draw():
         gl.glClear(gl.GL_COLOR_BUFFER_BIT)
@@ -1049,33 +986,29 @@ def test_neural():
 
 
 # Sampling Learning data
-def samplingData():
+# learning data: shape:(6,num)
+# [vx_last, vy_last, y_last, vx_this, vy_this, y_this, angle_hit]'
+def mass_spring_sampling_data(num=10):
+    def randomInit(vx_mean=0., vx_range=3., vy_mean=0., vy_range=2.,
+                   y_mean=2., y_range=1., rad_mean=-np.pi*.5, rad_range=-np.pi/3.):
+        y = y_mean + 2. * (np.random.random() - .5) * y_range
+        vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
+        vy = vy_mean + 2. * (np.random.random() - .5) * vy_range
+        rad = rad_mean + 2. * (np.random.random() - .5) * rad_range
+        return vx,vy,y,rad
+
     camera = Camera(scale=130)
     camera.setY(1.0)
     jumper = MassSpring(camera=camera)
     g = Ground(l=100,camera=camera)
-
-    num = 10
-    y_mean = 2.
-    y_range = 1.
-    vx_mean = 0.
-    vx_range = 3.
-    vy_mean = 0.
-    vy_range = 2.
-    rad_mean = -np.pi * .5
-    rad_range = -np.pi / 3.
-    y = y_mean + 2. * (np.random.random() - .5) * y_range
-    vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
-    vy = vy_mean + 2. * (np.random.random() - .5) * vy_range
-    rad = rad_mean + 2. * (np.random.random() - .5) * rad_range
+    num = num
+    vx,vy,y,rad = randomInit()
     jumper.init(0, y, rad, vx, vy)
-    input = [vx, vy, y, 0, 0, 0]
-    output = rad
-    inputData = np.ndarray((6, num))
-    outputData = np.ndarray((1, num))
-    state_last = 0
-    state_this = 0
-    i = 0
+    sample = [vx, vy, y, 0, 0, 0, rad]
+    data = np.zeros((7, num))
+    state = [0, 0]          # state[0]: last state; state[1] = this state
+    i = [0]
+
     @window.event
     def on_draw():
         gl.glClear(gl.GL_COLOR_BUFFER_BIT)
@@ -1084,35 +1017,36 @@ def samplingData():
         jumper.draw()
         g.draw()
 
-    def updataSamplingLearningData(dt, input, output, inputData, outputData, state_last, state_this, i, num):
+    def updataSamplingLearningData(dt, sample, data, state, i, num):
         jumper.update(dt=dt, control=False)
-        state_last = state_this
-        state_this = jumper.state
-        if state_last == 1 and state_this != state_last and i < num:
-            input[3:] = [jumper.vx, jumper.vy, jumper.y]
-            inputData[:, i] = input
-            outputData[:, i] = output
-            print(input)
-            print(output)
-            i += 1
-            if i == num:
-                np.save('input.npy', inputData)
-                np.save('output.npy', outputData)
+        state[0] = state[1]
+        state[1] = jumper.state
+        if state[0] == 1 and state[1] != state[0] and i[0] < num:
+            sample[3:-1] = [jumper.vx, jumper.vy, jumper.y]
+            data[:, i[0]] = sample
+            sample_display = [round(v,3) for v in sample]
+            print('sample '+str(i[0]+1)+'\tvx0,vy0,y0,vx1,vy1,y1,rad: '+str(sample_display))
+            i[0] += 1
+            if i[0] == num:
+                np.save('mass_spring_learning_data.npy', data)
                 print('sample ok')
-            y = y_mean + 2. * (np.random.random() - .5) * y_range
-            vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
-            vy = vy_mean + 2. * (np.random.random() - .5) * vy_range
-            rad = rad_mean + 2. * (np.random.random() - .5) * rad_range
+            vx, vy, y, rad = randomInit()
             jumper.init(0, y, rad, vx, vy)
-            input = [vx, vy, y, 0, 0, 0]
-            output = rad
-            state_last=0
-            state_this=0
+            sample[:] = [vx, vy, y, 0, 0, 0, rad]
+            state[:] = [0,0]
 
-    pyglet.clock.schedule_interval(updataSamplingLearningData,
-                                   input = input, output=output, inputData=inputData, outputData=outputData,
-                                   state_last=state_last,state_this=state_this, i=i, num=num,
-                                   interval=1.0 / 100.0)
+    pyglet.clock.schedule_interval(updataSamplingLearningData,interval=1./100.,
+                                   sample=sample, data=data, state=state, i=i, num=num)
     pyglet.app.run()
 
-samplingData()
+mass_spring_sampling_data(50)
+
+# Mass spring Learning from learning data
+def mass_spring_learning():
+    data = np.load('mass_spring_learning_data.npy')
+    input = data[:-1, :]
+    output = data[-1, :]
+    print(input)
+    print(output)
+
+# mass_spring_learning()
