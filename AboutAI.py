@@ -1014,7 +1014,6 @@ def mass_spring_sampling_data(num=10):
     def on_draw():
         gl.glClear(gl.GL_COLOR_BUFFER_BIT)
         gl.glLoadIdentity()
-
         jumper.draw()
         g.draw()
 
