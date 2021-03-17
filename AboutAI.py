@@ -3,6 +3,7 @@ import numpy as np
 import numpy.matlib
 import matplotlib.colors as mcol
 import pyglet
+import pandas as pd
 
 # O: Object   e.g. vtsO: vertexes in Object Coordinate System
 # W: World    e.g. vtsW: vertexes in World Coordinate System
@@ -989,7 +990,7 @@ def test_neural():
 # learning data: shape:(6,num)
 # [vx_last, vy_last, y_last, vx_this, vy_this, y_this, angle_hit]'
 def mass_spring_sampling_data(num=10):
-    def randomInit(vx_mean=0., vx_range=3., vy_mean=0., vy_range=2.,
+    def randomInit(vx_mean=0., vx_range=5., vy_mean=0., vy_range=5.,
                    y_mean=2., y_range=1., rad_mean=-np.pi*.5, rad_range=-np.pi/3.):
         y = y_mean + 2. * (np.random.random() - .5) * y_range
         vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
@@ -997,8 +998,8 @@ def mass_spring_sampling_data(num=10):
         rad = rad_mean + 2. * (np.random.random() - .5) * rad_range
         return vx,vy,y,rad
 
-    camera = Camera(scale=130)
-    camera.setY(1.0)
+    camera = Camera(scale=90)
+    camera.setY(1.5)
     jumper = MassSpring(camera=camera)
     g = Ground(l=100,camera=camera)
     num = num
@@ -1018,7 +1019,8 @@ def mass_spring_sampling_data(num=10):
         g.draw()
 
     def updataSamplingLearningData(dt, sample, data, state, i, num):
-        jumper.update(dt=dt, control=False)
+        jumper.update(dt=0.01, control=False)
+        # camera.setX(jumper.x)
         state[0] = state[1]
         state[1] = jumper.state
         if state[0] == 1 and state[1] != state[0] and i[0] < num:
@@ -1034,19 +1036,24 @@ def mass_spring_sampling_data(num=10):
             jumper.init(0, y, rad, vx, vy)
             sample[:] = [vx, vy, y, 0, 0, 0, rad]
             state[:] = [0,0]
+        elif state[1] == 2:
+            vx, vy, y, rad = randomInit()
+            jumper.init(0, y, rad, vx, vy)
+            sample[:] = [vx, vy, y, 0, 0, 0, rad]
+            state[:] = [0, 0]
 
     pyglet.clock.schedule_interval(updataSamplingLearningData,interval=1./100.,
                                    sample=sample, data=data, state=state, i=i, num=num)
     pyglet.app.run()
 
-mass_spring_sampling_data(50)
+# mass_spring_sampling_data(5000)
 
 # Mass spring Learning from learning data
 def mass_spring_learning():
-    data = np.load('mass_spring_learning_data.npy')
-    input = data[:-1, :]
-    output = data[-1, :]
-    print(input)
-    print(output)
+    data = np.load('mass_spring_learning_data_5000.npy')
+    data = np.array(data)
+    d = pd.DataFrame(data.T, columns=['vx0', 'vy0', 'y0', 'vx1', 'vy1', 'y1', 'rad'])
+    d.to_excel('mass_spring_learning_data.xls')
+    print(d)
 
-# mass_spring_learning()
+mass_spring_learning()
