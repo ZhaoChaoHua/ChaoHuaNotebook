@@ -3,6 +3,7 @@ import numpy as np
 import numpy.matlib
 import matplotlib.colors as mcol
 import pyglet
+import atexit
 import pandas as pd
 
 # O: Object   e.g. vtsO: vertexes in Object Coordinate System
@@ -219,6 +220,9 @@ class Circle:
     def getPosition(self):
         return [self.x, self.y]
 
+    def setColorH(self, h=0.):
+        self.hsv[0] = h
+
     def setColor(self, color = np.ones(4)):
         self.hsv = color[:3]
         self.alpha = color[3]
@@ -299,7 +303,7 @@ class Curve:
     def setInputSignal(self, s):
         self.signals[self.startPoint] = s
 
-    def getOutputSignal(self):
+    def get_outputSignal(self):
         return self.signals[self.endPoint-1]
 
 
@@ -521,7 +525,20 @@ class MassSpring:
         self.head = Circle(x, y, r, camera=camera)
         self.leg = Spring(l - r, self.rad, 6, 0.15 * self.l,
                           x=x + r * np.cos(rad), y=y + r * np.sin(rad), camera=camera)
+        # Neural network
+        self.nn = NeuralNet(camera=camera)
+        self.input_normalized = np.zeros((6,1))
+        self.nn_vx_range = 10.0
+        self.nn_vy_range = 10.
+        self.nn_y_min = .2
+        self.nn_y_max = 5.
+        self.nn_rad_min = -np.pi * 5. / 6.
+        self.nn_rad_max = -np.pi / 6.
 
+        self.vx_dst = 0.
+        self.vy_dst = 0.
+        self.y_dst = 2.
+        self.rad_dst = -np.pi*.5
         # There are 3 states of the mass-spring
         # state 0: the mass-spring is flying
         # state 1: the mass-spring is standing
@@ -551,6 +568,7 @@ class MassSpring:
         self.dvrad = 0.0  # Change of angular velocity of the leg
 
         # Measurement data
+        self.control = False
         self.err = 0.0  # Angular error
         self.lerr = 0.0  # Last time step angular error
         self.derr = 0.0  # Change of angular error
@@ -578,6 +596,32 @@ class MassSpring:
         self.rad = rad
         self.vx = vx
         self.vy = vy
+
+    def construct_neural_network_from_file(self, name='mass_spring_neural_network.npz'):
+        self.nn.construct_from_file(name)
+
+    def remap(self, x, old_min, old_max, new_min=0., new_max=1.):
+        old_mean = .5*(old_max+old_min)
+        old_range = old_max - old_min
+        new_mean = .5*(new_max+new_min)
+        new_range = new_max - new_min
+        y = (x-old_mean)*new_range/old_range + new_mean
+        return y
+
+    def network_cal_rad(self):
+        self.input_normalized[0, 0] = self.remap(self.vx, -self.nn_vx_range, self.nn_vx_range)
+        self.input_normalized[1, 0] = self.remap(self.vy, -self.nn_vy_range, self.nn_vy_range)
+        self.input_normalized[2, 0] = self.remap(self.y, self.nn_y_min, self.nn_y_max)
+        self.input_normalized[3, 0] = self.remap(self.vx_dst, -self.nn_vx_range, self.nn_vx_range)
+        self.input_normalized[4, 0] = self.remap(self.vy_dst, -self.nn_vy_range, self.nn_vy_range)
+        self.input_normalized[5, 0] = self.remap(self.y_dst, self.nn_y_min, self.nn_y_max)
+        y = self.nn.cal_output(self.input_normalized)
+        self.rad_dst = self.remap(y[0, 0], 0., 1., self.nn_rad_min, self.nn_rad_max)
+
+    def set_jump_dst(self, vx_dst, vy_dst, y_dst):
+        self.vx_dst = vx_dst
+        self.vy_dst = vy_dst
+        self.y_dst = y_dst
 
     def adjustVelocity(self):
         self.pe = self.m * gravity * self.y
@@ -650,6 +694,9 @@ class MassSpring:
                 self.state = 0
                 self.y0 = 0
                 self.adjustVelocity()
+                if self.control:
+                    self.network_cal_rad()
+                # print('vx: '+str(round(self.vx, 3)))
 
             # standing -> stop
             if ground(self.x) >= self.y - self.r:
@@ -667,8 +714,8 @@ class MassSpring:
     def hold(self):
         self.state = 3
 
-    def updateInput(self, dstRad, control=True):
-        if not control:
+    def updateInput(self, dstRad):
+        if not self.control:
             self.u = 0
         else:
             self.err = dstRad - self.rad
@@ -688,9 +735,11 @@ class MassSpring:
             self.u = self.kpv * self.errv + self.kdv * self.derrv
             self.u = limit(self.u, self.ulim)
 
-    def update(self, dstRad=None, dt=0.01, control=True):
+    def update(self, dt=0.01, control=True):
+        self.control = control
         self.dt = dt
-        self.updateInput(dstRad, control)
+        if control:
+            self.updateInput(self.rad_dst)
         self.updateState()
 
     def draw(self):
@@ -767,7 +816,6 @@ class Layer:
         # Graph
         self.nodes = np.zeros(self.dimY, dtype=Circle)
         self.edges = np.zeros((self.dimY, self.dimX), dtype=Curve)
-
         # Color map
         h0 = 0.59
         h1 = 0.03
@@ -778,7 +826,14 @@ class Layer:
         self.vec1 = np.array([np.cos(rad1), np.sin(rad1)])
 
         self.nodesColor = np.ones((self.dimY, 4))
-        self.map2nodesColor(self.bias)
+
+    def get_parameter(self):
+        return [self.weight, self.bias, self.actFunc]
+
+    def set_parameter(self, parameter):
+        self.weight = parameter[0]
+        self.bias = parameter[1]
+        self.actFunc = parameter[2]
 
     def map2nodesColor(self, v):
         s1 = v#sigmoid(self.k * v)
@@ -810,19 +865,19 @@ class Layer:
         self.weight = np.random.random((self.dimY, self.dimX))
         self.bias = np.random.random((self.dimY, 1))
 
-    def calOutput(self, x):
+    def cal_output(self, x):
         self.x = x
         if self.actFunc == 1:  # Sigmoid activation function
-            self.y = self.calOutputSigmoid(self.x)
+            self.y = self.cal_outputSigmoid(self.x)
         elif self.actFunc == 2:  # Relu actiation function
-            self.y = self.calOutputRelu(self.x)
+            self.y = self.cal_outputRelu(self.x)
         return self.y
 
-    def calOutputSigmoid(self, x):
+    def cal_outputSigmoid(self, x):
         z = np.dot(self.weight, x) + self.bias
         return sigmoid(z)
 
-    def calOutputRelu(self, x):
+    def cal_outputRelu(self, x):
         return relu(np.dot(self.weight, x) + self.bias)
 
     def backpropagation(self, djy, alpha):
@@ -840,20 +895,21 @@ class Layer:
         self.bias -= alpha * self.djb
         return self.djx
 
-    def setEdgeInput(self, x):
+    def set_edge_input(self, x):
         for i in range(self.dimY):
             for j in range(self.dimX):
                 self.edges[i, j].setInputSignal(x[j])
 
-    def getOutput(self):
+    def get_output(self):
         return self.y
 
-    def initGraph(self, x=0., y=0., r=.2, camera=None):
+    def init_graph(self, x=0., y=0., r=.2, camera=None):
         b = 6. * r
         d = 3. * r
         offsetX = .5 * b
         offsetYNode = .5*(self.dimY-1)*d
         offsetYedge = .5*(self.dimX-1)*d
+        self.map2nodesColor(self.bias)
         for i in range(self.dimY):
             self.nodes[i] = Circle(x=x+offsetX, y=y+d*i-offsetYNode, radius=r,
                                    h=self.nodesColor[i, 0], s=self.nodesColor[i, 1], v=self.nodesColor[i, 2],
@@ -867,8 +923,8 @@ class Layer:
     def draw(self):
         x = np.zeros((self.dimX, 1))
         for j in range(self.dimX):
-            x[j, 0] = self.edges[0, j].getOutputSignal()
-        y = self.calOutput(x)
+            x[j, 0] = self.edges[0, j].get_outputSignal()
+        y = self.cal_output(x)
         self.map2nodesColor(y)
         for i in range(self.dimY):
             self.nodes[i].setColor(self.nodesColor[i, :])
@@ -883,6 +939,7 @@ class Layer:
 # ls: number of neures in every hidden layer
 class NeuralNet:
     def __init__(self, dimIn=2, dimOut=3, ls=np.array([3, 3, 3]), camera=None):
+        self.ls = ls
         self.numLs = len(ls) + 1  # Layers count
         self.layers = []
         self.dimIn = dimIn
@@ -905,30 +962,80 @@ class NeuralNet:
         # Graph
         self.camera = camera
         self.inputNode = np.zeros(self.dimIn, dtype=Circle)
-        self.initGraph()
         self.edgeInput = np.zeros(self.dimIn)
+        self.init_graph()
 
-    def initGraph(self, x=0., y=0., r=.2):
+    def save_network_structure(self, name='neural_network'):
+        ls = self.ls
+        num_ls = self.numLs
+        dim_in = self.dimIn
+        dim_out = self.dimOut
+        layers_parameters = []
+        for l in self.layers:
+            layers_parameters.append(l.get_parameter())
+        np.savez(name, ls=ls, num_ls=num_ls, dim_in=dim_in, dim_out=dim_out,
+                 layers_parameters=layers_parameters)
+
+    def construct_from_file(self, name='neural_network.npz'):
+        params = np.load(name, allow_pickle=True)
+        self.ls = params['ls']
+        self.numLs = len(self.ls)+1
+        self.layers = []
+        self.dimIn = params['dim_in']
+        self.dimOut = params['dim_out']
+        layers_parameters = params['layers_parameters']
+
+
+        dimx = self.dimIn
+        for i in range(self.numLs -1):
+            dimy = self.ls[i]
+            l = Layer(dimx, dimy)
+            l.set_parameter(layers_parameters[i])
+            dimx = dimy
+            self.layers.append(l)
+        l = Layer(dimx, self.dimOut)
+        l.set_parameter(layers_parameters[-1])
+        self.layers.append(l)
+        print('Neural Network:')
+        print('dim in: '+str(self.dimIn) + '\t dim out: ' + str(self.dimOut))
+        print('layers: ' + str(self.ls))
+
+        self.init_graph()
+
+
+    def init_graph(self, x=0., y=0., r=.2):
         b = 6. * r
         d = 3. * r
         offsetX = .5 * (self.numLs-1) * b
         offsetInputNodeY = .5*(self.dimIn-1) * d
+
+
+        self.inputNode = np.zeros(self.dimIn, dtype=Circle)
         for i in range(self.dimIn):
             self.inputNode[i] = Circle(x=x-.5*b-offsetX, y=y+i*d-offsetInputNodeY, radius=r,
                                        s=0., v=.5, camera=self.camera)
         for i in range(self.numLs):
-            self.layers[i].initGraph(x=x+b*i-offsetX, y=y, r=r, camera=self.camera)
+            self.layers[i].init_graph(x=x+b*i-offsetX, y=y, r=r, camera=self.camera)
+        self.edgeInput = np.zeros(self.dimIn)
 
-    def calOutput(self, input):
+
+    def cal_output(self, input):
         x = input
         for i in range(self.numLs):
-            x = self.layers[i].calOutput(x)
+            x = self.layers[i].cal_output(x)
+            # print('weight '+str(i))
+            # print(self.layers[i].weight)
+            # print('out:'+str(np.shape(x)))
+            # print(x)
         return x
+        # for l in self.layers:
+        #     x = l.cal_output(x)
+        # return x
 
-    def calOutputGrid(self, x):
+    def cal_output_grid(self, x):
         s = x.shape
         xv = x.reshape((-1, 2)).T
-        y = self.calOutput(xv)
+        y = self.cal_output(xv)
         y = y.reshape((s[0], s[1]))
         return y
 
@@ -938,12 +1045,14 @@ class NeuralNet:
             djx = self.layers[-i - 1].backpropagation(djx, alpha)
 
     def training(self, xdata, ydata, iteration=500, alpha=0.1):
+        print('training...')
         for i in range(iteration):
-            self.yest = self.calOutput(xdata)
+            self.yest = self.cal_output(xdata)
             self.err = self.yest - ydata
-            self.j = np.sum(0.5 * self.err ** 2)
+            self.j = np.sum(.5 * self.err ** 2.)
             self.js.append(self.j)
             self.backpropagation(self.err, alpha)
+            print('iteration: ' + str(i) + '\tcost: '+str(round(float(self.j), 5)))
 
     def setInput(self, x):
         self.edgeInput = x
@@ -954,17 +1063,19 @@ class NeuralNet:
             self.inputNode[i].draw()
         x = self.edgeInput
         for l in range(self.numLs):
-            self.layers[l].setEdgeInput(x)
+            self.layers[l].set_edge_input(x)
             self.layers[l].draw()
-            x = self.layers[l].getOutput()
+            x = self.layers[l].get_output()
 
 
 # TEST
 # Neural network test
 def test_neural():
-    camera = Camera(scale=130)
+    camera = Camera(scale=100)
     camera.setY(0.0)
-    nn = NeuralNet(dimIn=2, dimOut=2, ls=np.array([7, 6, 5]), camera=camera)
+    nn = NeuralNet(dimIn=2, dimOut=2, ls=np.array([2, 2, 5]), camera=camera)
+    nn.construct_from_file('mass_spring_neural_network.npz')
+    # nn.save_network_structure()
     t = [0]
     @window.event
     def on_draw():
@@ -973,23 +1084,22 @@ def test_neural():
 
         nn.draw()
 
-    def update(dt):
-        global t
-        t += dt
+    def update(dt, t):
+        t[0] += dt
         w = 1.
-        s = .5*np.sin(2.*np.pi*w*t)+.5
-        c = .5*np.cos(2.*np.pi*w*t)+.5
-        nn.setInput(np.array([s, c]))
-    pyglet.clock.schedule_interval(update, 1.0 / 100.0)
+        s = .5*np.sin(2.*np.pi*w*t[0])+.5
+        c = .5*np.cos(2.*np.pi*w*t[0])+.5
+        nn.setInput(np.array([s, c, s, c, s, c]).reshape(-1, 1))
+        print(nn.cal_output(np.array([s, c, s, c, s, c]).reshape(-1, 1)))
+    pyglet.clock.schedule_interval(update, t=t, interval=1.0 / 100.0)
     pyglet.app.run()
-
 # test_neural()
 
 
 # Sampling Learning data
 # learning data: shape:(6,num)
 # [vx_last, vy_last, y_last, vx_this, vy_this, y_this, angle_hit]'
-def mass_spring_sampling_data(num=10):
+def mass_spring_sampling_data(num=10, fast_mode = False):
     def randomInit(vx_mean=0., vx_range=5., vy_mean=0., vy_range=5.,
                    y_mean=2., y_range=1., rad_mean=-np.pi*.5, rad_range=-np.pi/3.):
         y = y_mean + 2. * (np.random.random() - .5) * y_range
@@ -1017,7 +1127,7 @@ def mass_spring_sampling_data(num=10):
         jumper.draw()
         g.draw()
 
-    def updataSamplingLearningData(dt, sample, data, state, i, num):
+    def update(dt, sample, data, state, i, num):
         jumper.update(dt=0.01, control=False)
         # camera.setX(jumper.x)
         state[0] = state[1]
@@ -1025,11 +1135,12 @@ def mass_spring_sampling_data(num=10):
         if state[0] == 1 and state[1] != state[0] and i[0] < num:
             sample[3:-1] = [jumper.vx, jumper.vy, jumper.y]
             data[:, i[0]] = sample
-            sample_display = [round(v,3) for v in sample]
+            sample_display = [round(v, 3) for v in sample]
             print('sample '+str(i[0]+1)+'\tvx0,vy0,y0,vx1,vy1,y1,rad: '+str(sample_display))
             i[0] += 1
             if i[0] == num:
-                np.save('mass_spring_learning_data.npy', data)
+                name = 'mass_spring_learning_data_'+str(num/1000)+'_k'
+                np.save(name, data)
                 print('sample ok')
             vx, vy, y, rad = randomInit()
             jumper.init(0, y, rad, vx, vy)
@@ -1041,18 +1152,101 @@ def mass_spring_sampling_data(num=10):
             sample[:] = [vx, vy, y, 0, 0, 0, rad]
             state[:] = [0, 0]
 
-    pyglet.clock.schedule_interval(updataSamplingLearningData,interval=1./100.,
-                                   sample=sample, data=data, state=state, i=i, num=num)
-    pyglet.app.run()
+    if fast_mode:
+        while(i[0] <= num):
+            update(dt=0.01, sample=sample, data=data, state=state, i=i, num=num)
 
-# mass_spring_sampling_data(5000)
+
+    else:
+        pyglet.clock.schedule_interval(update,interval=1./100.,
+                                       sample=sample, data=data, state=state, i=i, num=num)
+        pyglet.app.run()
+# mass_spring_sampling_data(100000, fast_mode=True)
 
 # Mass spring Learning from learning data
 def mass_spring_learning():
-    data = np.load('mass_spring_learning_data_5000.npy')
-    data = np.array(data)
-    d = pd.DataFrame(data.T, columns=['vx0', 'vy0', 'y0', 'vx1', 'vy1', 'y1', 'rad'])
-    d.to_excel('mass_spring_learning_data.xls')
-    print(d)
+    def remap(x, old_min, old_max, new_min=0., new_max=1.):
+        old_mean = .5*(old_max+old_min)
+        old_range = old_max - old_min
+        new_mean = .5*(new_max+new_min)
+        new_range = new_max - new_min
+        y = (x-old_mean)*new_range/old_range + new_mean
+        return y
+    def normalize_data(input_data,output_data,vx_range=10., vy_range=10., y_min=.2, y_max=5., 
+                       rad_min=-np.pi*5./6., rad_max=-np.pi/6.):
+        input_data[0, :] = remap(input_data[0, :], -vx_range, vx_range)
+        input_data[1, :] = remap(input_data[1, :], -vy_range, vy_range)
+        input_data[2, :] = remap(input_data[2, :], y_min, y_max)
+        input_data[3, :] = remap(input_data[3, :], -vx_range, vx_range)
+        input_data[4, :] = remap(input_data[4, :], -vy_range, vy_range)
+        input_data[5, :] = remap(input_data[5, :], y_min, y_max)
+        output_data[:] = remap(output_data[:], rad_min, rad_max)
 
-mass_spring_learning()
+    data = np.load('mass_spring_learning_data_100k.npy')
+    data = np.array(data)
+    # d = pd.DataFrame(data.T, columns=['vx0', 'vy0', 'y0', 'vx1', 'vy1', 'y1', 'rad'])
+    # d.to_excel('mass_spring_learning_data.xls')
+    learning_num = 30000
+    input_data = data[:-1, :learning_num]
+    output_data = data[-1, :learning_num]
+    normalize_data(input_data, output_data)
+    print(input_data)
+    print(output_data)
+
+    camera = Camera(scale=100)
+    nn = NeuralNet(dimIn=6, dimOut=1, ls=10*np.ones(30,dtype=int),camera=camera)
+    # nn.construct_from_file('mass_spring_nn_50_l_10k_s.npz')
+    iter = 3000
+    nn.training(input_data, output_data, iteration=iter, alpha=0.01)
+    nn.save_network_structure(name='mass_spring_nn_50_l_10k_s')
+
+# nn = mass_spring_learning()
+
+
+# Mass spring let's jump
+def mass_spring_jump():
+    camera = Camera(scale=30)
+    camera.setY(4.5)
+    ground = Ground(l=100, camera=camera)
+
+    jumpers = []
+    num = 2
+    for i in range(num):
+        j = MassSpring(camera=camera)
+        j.set_jump_dst(vx_dst=2., vy_dst=2., y_dst=.8)
+        j.head.setColorH(i/float(num))
+        jumpers.append(j)
+    jumpers[0].construct_neural_network_from_file('mass_spring_nn_50_l_10k_s.npz')
+    jumpers[1].construct_neural_network_from_file('mass_spring_neural_network.npz')
+
+
+    t = [0]
+    @window.event
+    def on_draw():
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+        gl.glLoadIdentity()
+
+        ground.draw()
+        for j in jumpers:
+            j.draw()
+    def update(dt, t):
+        x = 0
+        for j in range(len(jumpers)):
+            if jumpers[j].x < 10:
+                jumpers[j].set_jump_dst(vx_dst=2., vy_dst=2., y_dst=.8)
+            else:
+                jumpers[j].set_jump_dst(vx_dst=0., vy_dst=2., y_dst=.8)
+            jumpers[j].update(dt=0.01, control=True)
+            jumpers[j].update()
+            print('jumper '+str(j)+' x:'+str(round(jumpers[j].x,3)))
+            x += jumpers[j].x
+        x /= len(jumpers)
+        camera.setX(x)
+
+    pyglet.clock.schedule_interval(update,t=t,interval=1/100)
+    pyglet.app.run()
+mass_spring_jump()
+
+
+
+
