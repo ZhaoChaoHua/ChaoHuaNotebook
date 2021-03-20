@@ -3,7 +3,7 @@ import numpy as np
 import numpy.matlib
 import matplotlib.colors as mcol
 import pyglet
-import atexit
+import time
 import pandas as pd
 
 # O: Object   e.g. vtsO: vertexes in Object Coordinate System
@@ -609,16 +609,22 @@ class MassSpring:
         return y
 
     def network_cal_rad(self):
-        self.input_normalized[0, 0] = self.remap(self.vx, -self.nn_vx_range, self.nn_vx_range)
-        self.input_normalized[1, 0] = self.remap(self.vy, -self.nn_vy_range, self.nn_vy_range)
-        self.input_normalized[2, 0] = self.remap(self.y, self.nn_y_min, self.nn_y_max)
-        self.input_normalized[3, 0] = self.remap(self.vx_dst, -self.nn_vx_range, self.nn_vx_range)
-        self.input_normalized[4, 0] = self.remap(self.vy_dst, -self.nn_vy_range, self.nn_vy_range)
-        self.input_normalized[5, 0] = self.remap(self.y_dst, self.nn_y_min, self.nn_y_max)
-        y = self.nn.cal_output(self.input_normalized)
-        self.rad_dst = self.remap(y[0, 0], 0., 1., self.nn_rad_min, self.nn_rad_max)
+        if self.nn.dimIn == 6:
+            self.input_normalized[0, 0] = self.remap(self.vx, -self.nn_vx_range, self.nn_vx_range)
+            self.input_normalized[1, 0] = self.remap(self.vy, -self.nn_vy_range, self.nn_vy_range)
+            self.input_normalized[2, 0] = self.remap(self.y, self.nn_y_min, self.nn_y_max)
+            self.input_normalized[3, 0] = self.remap(self.vx_dst, -self.nn_vx_range, self.nn_vx_range)
+            self.input_normalized[4, 0] = self.remap(self.vy_dst, -self.nn_vy_range, self.nn_vy_range)
+            self.input_normalized[5, 0] = self.remap(self.y_dst, self.nn_y_min, self.nn_y_max)
+            self.rad_dst = self.remap(self.nn.cal_output(self.input_normalized)[0, 0], 0., 1., self.nn_rad_min, self.nn_rad_max)
+        elif self.nn.dimIn == 5:
+            self.input_normalized[0, 0] = self.remap(self.vx, -self.nn_vx_range, self.nn_vx_range)
+            self.input_normalized[1, 0] = self.remap(self.vy, -self.nn_vy_range, self.nn_vy_range)
+            self.input_normalized[2, 0] = self.remap(self.y, self.nn_y_min, self.nn_y_max)
+            self.input_normalized[3, 0] = self.remap(self.vx_dst, -self.nn_vx_range, self.nn_vx_range)
+            self.rad_dst = self.remap(self.nn.cal_output(self.input_normalized[:5])[0, 0], 0., 1., self.nn_rad_min, self.nn_rad_max)
 
-    def set_jump_dst(self, vx_dst, vy_dst, y_dst):
+    def set_jump_dst(self, vx_dst, vy_dst, y_dst=.8):
         self.vx_dst = vx_dst
         self.vy_dst = vy_dst
         self.y_dst = y_dst
@@ -827,6 +833,10 @@ class Layer:
 
         self.nodesColor = np.ones((self.dimY, 4))
 
+    def random_init_parameters(self):
+        self.weight = self.weightRange * (np.random.random((self.dimY, self.dimX)) - 0.5)
+        self.bias = self.biasRange * (np.random.random((self.dimY, 1)) - 0.5)
+
     def get_parameter(self):
         return [self.weight, self.bias, self.actFunc]
 
@@ -965,6 +975,10 @@ class NeuralNet:
         self.edgeInput = np.zeros(self.dimIn)
         self.init_graph()
 
+    def random_init_parameters(self):
+        for l in self.layers:
+            l.random_init_parameters()
+
     def save_network_structure(self, name='neural_network'):
         ls = self.ls
         num_ls = self.numLs
@@ -1044,15 +1058,30 @@ class NeuralNet:
         for i in range(self.numLs):
             djx = self.layers[-i - 1].backpropagation(djx, alpha)
 
-    def training(self, xdata, ydata, iteration=500, alpha=0.1):
+    def training(self, xdata, ydata, iteration=500, alpha=0.1, detect_vg = True):
         print('training...')
-        for i in range(iteration):
+        i = 0
+        t0 = time.time()
+        print('t:'+str(t0))
+        while i < iteration:
+            # print(xdata)
             self.yest = self.cal_output(xdata)
             self.err = self.yest - ydata
             self.j = np.sum(.5 * self.err ** 2.)
+            jj = self.j/xdata.shape[1]
             self.js.append(self.j)
             self.backpropagation(self.err, alpha)
-            print('iteration: ' + str(i) + '\tcost: '+str(round(float(self.j), 5)))
+            print('iteration: ' + str(i) + '/'+str(iteration)+'\tcost: '\
+                  +str(round(float(self.j), 5)) + '\t cost/samples: '+str(round(float(jj),10))\
+                  )
+            # Detect vanishing gradient
+            if detect_vg and self.j > 100 and i > 5 and self.js[i-4] - self.js[i-1] < 0.0001:
+                self.js = []
+                self.random_init_parameters()
+                i = 0
+                print(self.js)
+                print('restart...')
+            i += 1
 
     def setInput(self, x):
         self.edgeInput = x
@@ -1094,7 +1123,6 @@ def test_neural():
     pyglet.clock.schedule_interval(update, t=t, interval=1.0 / 100.0)
     pyglet.app.run()
 # test_neural()
-
 
 # Sampling Learning data
 # learning data: shape:(6,num)
@@ -1163,8 +1191,48 @@ def mass_spring_sampling_data(num=10, fast_mode = False):
         pyglet.app.run()
 # mass_spring_sampling_data(100000, fast_mode=True)
 
+# Redefine data
+def mass_sprint_learning_5_input():
+    def remap(x, old_min, old_max, new_min=0., new_max=1.):
+        old_mean = .5*(old_max+old_min)
+        old_range = old_max - old_min
+        new_mean = .5*(new_max+new_min)
+        new_range = new_max - new_min
+        y = (x-old_mean)*new_range/old_range + new_mean
+        return y
+    def normalize_data(input_data, output_data, vx_range=10., vy_range=10., y_min=.2, y_max=5.,
+                       rad_min=-np.pi*5./6., rad_max=-np.pi/6.):
+        input_data[0, :] = remap(input_data[0, :], -vx_range, vx_range)
+        input_data[1, :] = remap(input_data[1, :], -vy_range, vy_range)
+        input_data[2, :] = remap(input_data[2, :], y_min, y_max)
+        input_data[3, :] = remap(input_data[3, :], -vx_range, vx_range)
+        output_data[:] = remap(output_data[:], rad_min, rad_max)
+    data = np.load('mass_spring_learning_data_100k.npy')
+    data = np.array(data)
+    # Save to excel
+    # data_pd = pd.DataFrame(data.T, columns=['vx0', 'vy0', 'y0', 'vx1', 'vy1', 'y1', 'rad'])
+    # data_pd.to_excel('mass_spring_learning_data_100k.xlsx')
+    vy1 = data[4, :]
+    vy1[vy1 > 3] = 2.
+    vy1[(vy1 <= 3.) * (vy1 >= 0.5)] = 1.
+    vy1[vy1 < 0.5] = 0.
+    input_data = np.vstack([data[:4, :], vy1])
+    output_data = data[-1, :]
+
+    learning_num = 40000
+    input_data = input_data[:, :learning_num]
+    output_data = output_data[:learning_num]
+    normalize_data(input_data, output_data)
+
+    nn = NeuralNet(dimIn=5, dimOut=1, ls=15*np.ones(1, dtype=int))
+    # nn.save_network_structure('mass_spring_nn_5_inputs_20_layers_30k_samples_1st_loop')
+    nn.construct_from_file('mass_spring_nn_5_inputs_20_layers_10k_samples.npz')
+    nn.training(input_data, output_data, iteration=8000, alpha=0.1, detect_vg=True)
+    nn.save_network_structure(name='mass_spring_nn_5_inputs_20_layers_10k_samples')
+# mass_sprint_learning_5_input()
+
 # Mass spring Learning from learning data
-def mass_spring_learning():
+def mass_spring_learning_6_input():
     def remap(x, old_min, old_max, new_min=0., new_max=1.):
         old_mean = .5*(old_max+old_min)
         old_range = old_max - old_min
@@ -1186,21 +1254,16 @@ def mass_spring_learning():
     data = np.array(data)
     # d = pd.DataFrame(data.T, columns=['vx0', 'vy0', 'y0', 'vx1', 'vy1', 'y1', 'rad'])
     # d.to_excel('mass_spring_learning_data.xls')
-    learning_num = 30000
+    learning_num = 5000
     input_data = data[:-1, :learning_num]
     output_data = data[-1, :learning_num]
     normalize_data(input_data, output_data)
-    print(input_data)
-    print(output_data)
 
-    camera = Camera(scale=100)
-    nn = NeuralNet(dimIn=6, dimOut=1, ls=10*np.ones(30,dtype=int),camera=camera)
-    # nn.construct_from_file('mass_spring_nn_50_l_10k_s.npz')
-    iter = 3000
-    nn.training(input_data, output_data, iteration=iter, alpha=0.01)
-    nn.save_network_structure(name='mass_spring_nn_50_l_10k_s')
-
-# nn = mass_spring_learning()
+    nn = NeuralNet(dimIn=6, dimOut=1, ls=10*np.ones(3, dtype=int))
+    # nn.construct_from_file('mass_spring_nn_5.npz')
+    nn.training(input_data, output_data, iteration=4000, alpha=0.01, detect_vg=True)
+    nn.save_network_structure(name='mass_spring_nn_5')
+nn = mass_spring_learning_6_input()
 
 
 # Mass spring let's jump
@@ -1213,12 +1276,11 @@ def mass_spring_jump():
     num = 2
     for i in range(num):
         j = MassSpring(camera=camera)
-        j.set_jump_dst(vx_dst=2., vy_dst=2., y_dst=.8)
+        j.set_jump_dst(vx_dst=.0, vy_dst=2., y_dst=.8)
         j.head.setColorH(i/float(num))
         jumpers.append(j)
-    jumpers[0].construct_neural_network_from_file('mass_spring_nn_50_l_10k_s.npz')
+    jumpers[0].construct_neural_network_from_file('mass_spring_nn_5.npz')
     jumpers[1].construct_neural_network_from_file('mass_spring_neural_network.npz')
-
 
     t = [0]
     @window.event
@@ -1232,8 +1294,8 @@ def mass_spring_jump():
     def update(dt, t):
         x = 0
         for j in range(len(jumpers)):
-            if jumpers[j].x < 10:
-                jumpers[j].set_jump_dst(vx_dst=2., vy_dst=2., y_dst=.8)
+            if jumpers[j].x > -5:
+                jumpers[j].set_jump_dst(vx_dst=-1., vy_dst=2., y_dst=.8)
             else:
                 jumpers[j].set_jump_dst(vx_dst=0., vy_dst=2., y_dst=.8)
             jumpers[j].update(dt=0.01, control=True)
@@ -1241,7 +1303,7 @@ def mass_spring_jump():
             print('jumper '+str(j)+' x:'+str(round(jumpers[j].x,3)))
             x += jumpers[j].x
         x /= len(jumpers)
-        camera.setX(x)
+        # camera.setX(x)
 
     pyglet.clock.schedule_interval(update,t=t,interval=1/100)
     pyglet.app.run()
