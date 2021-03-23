@@ -1104,7 +1104,7 @@ class NeuralNet:
             # print(xdata)
             self.yest = self.cal_output(xdata)
             self.err = self.yest - ydata
-            self.j = np.sum(.5 * self.err ** 2.)
+            self.j = np.sum(self.err ** 2.)
             jj = self.j/data_num
             self.js.append(self.j)
             self.backpropagation(self.err, alpha)
@@ -1359,17 +1359,18 @@ def mass_spring_learning_4_input_fuzzy():
     y1[vy1 <= 0] = 0.
     input_data = np.vstack([vx0, y0_top, vx1, y1])
     output_data = data[-1, :]
+    # np.save('mass_spring_learning_data_norm_50k.npy', np.vstack([input_data,output_data]))
 
-    learning_num = 50000
+    learning_num = 40000
     input_data = input_data[:, :learning_num]
     output_data = output_data[:learning_num]
     normalize_data(input_data, output_data)
 
     nn = NeuralNet(dimIn=4, dimOut=1, ls=10*np.ones(20, dtype=int))
     # nn.save_network_structure('mass_spring_nn_4_input_1st_loop')
-    nn.construct_from_file('mass_spring_nn_4_input_fuzzy_1.npz')
+    nn.construct_from_file('mass_spring_nn_4_input_fuzzy_deep_1.npz')
     nn.training(input_data, output_data, iteration=10000, alpha=0.0001, detect_vg=True, dynamic_step=True)
-    nn.save_network_structure(name='mass_spring_nn_4_input_fuzzy_2')
+    nn.save_network_structure(name='mass_spring_nn_4_input_fuzzy_deep_2')
 mass_spring_learning_4_input_fuzzy()
 
 # Mass spring Learning from learning data
@@ -1409,11 +1410,11 @@ def mass_spring_jump():
     num = 2
     for i in range(num):
         j = MassSpring(y=3.5, camera=camera)
-        j.set_jump_dst(vx_dst=2., y_dst=1.)
+        j.set_jump_dst(vx_dst=0., y_dst=1.)
         j.head.setColorH(i/float(num))
         jumpers.append(j)
-    jumpers[0].construct_neural_network_from_file('mass_spring_nn_4_input_fuzzy_deep_3.npz')
-    jumpers[1].construct_neural_network_from_file('mass_spring_nn_4_input_fuzzy_deep_2.npz')
+    jumpers[0].construct_neural_network_from_file('mass_spring_nn_4_input_fuzzy_2.npz')
+    jumpers[1].construct_neural_network_from_file('mass_spring_nn_4_input_fuzzy_deep_1.npz')
 
     t = [0]
     @window.event
@@ -1428,14 +1429,14 @@ def mass_spring_jump():
         x = 0
         for j in range(len(jumpers)):
             if jumpers[j].x < 500:
-                jumpers[j].set_jump_dst(vx_dst=2., y_dst=1.)
+                jumpers[j].set_jump_dst(vx_dst=0., y_dst=1.)
             else:
                 jumpers[j].set_jump_dst(vx_dst=0., y_dst=1.)
             jumpers[j].update(dt=dt, control=True)
             print('jumper '+str(j)+'\tx: '+str(round(jumpers[j].x,3))+'\tvx: '+str(round(jumpers[j].vx,3)))
             x += jumpers[j].x
         x /= len(jumpers)
-        camera.setX(jumpers[1].x)
+        camera.setX(jumpers[0].x)
 
     pyglet.clock.schedule_interval(update, t=t, interval=1/100)
     pyglet.app.run()
