@@ -16,10 +16,20 @@ lw = 2.0  # Line width
 config = gl.Config(sample_buffers=1, samples=8)  # Anti-aliasing
 window = pyglet.window.Window(w, h, config=config)
 
+# Angle to rotation matrix
 def rad2rm(theta):
     s = np.sin(theta)
     c = np.cos(theta)
     return np.mat([[c, -s], [s, c]])
+
+# Value remap
+def remap(x, old_min, old_max, new_min=0., new_max=1.):
+    old_mean = .5*(old_max+old_min)
+    old_range = old_max - old_min
+    new_mean = .5*(new_max+new_min)
+    new_range = new_max - new_min
+    y = (x-old_mean)*new_range/old_range + new_mean
+    return y
 
 
 class Camera:
@@ -514,7 +524,7 @@ class Ground(Element):
 
 
 class MassSpring:
-    def __init__(self, r=0.2, l=1.2, rad=-np.pi * 0.5, x=0.0, y=3, vx=0.0, vy=0.0, dt=0.01, camera=None):
+    def __init__(self, r=0.2, l=1.2, rad=-np.pi * 0.5, x=0.0, y=3., vx=0.0, vy=0.0, dt=0.01, camera=None):
         self.r = r  # Radius of the head (m)
         self.l = l  # Length of the leg (m)
         self.rad = rad  # Direction of the leg (rad)
@@ -600,31 +610,33 @@ class MassSpring:
     def construct_neural_network_from_file(self, name='mass_spring_neural_network.npz'):
         self.nn.construct_from_file(name)
 
-    def remap(self, x, old_min, old_max, new_min=0., new_max=1.):
-        old_mean = .5*(old_max+old_min)
-        old_range = old_max - old_min
-        new_mean = .5*(new_max+new_min)
-        new_range = new_max - new_min
-        y = (x-old_mean)*new_range/old_range + new_mean
-        return y
+    def network_cal_rad(self, vx=0., vy=0., y=0., vx_dst=0., vy_dst=0., y_dst=0.):
+        if self.nn.dimIn == 4:
+            self.input_normalized[0, 0] = remap(vx, -self.nn_vx_range, self.nn_vx_range)
+            self.input_normalized[1, 0] = remap(y, -self.nn_y_min, self.nn_y_max)
+            self.input_normalized[2, 0] = remap(vx_dst, -self.nn_vx_range, self.nn_vx_range)
+            self.input_normalized[3, 0] = y_dst#remap(y_dst, -self.nn_y_min, self.nn_y_max)
+            self.rad_dst = remap(self.nn.cal_output(self.input_normalized[:4])[0, 0], 0., 1., self.nn_rad_min,
+                                 self.nn_rad_max)
 
-    def network_cal_rad(self):
-        if self.nn.dimIn == 6:
-            self.input_normalized[0, 0] = self.remap(self.vx, -self.nn_vx_range, self.nn_vx_range)
-            self.input_normalized[1, 0] = self.remap(self.vy, -self.nn_vy_range, self.nn_vy_range)
-            self.input_normalized[2, 0] = self.remap(self.y, self.nn_y_min, self.nn_y_max)
-            self.input_normalized[3, 0] = self.remap(self.vx_dst, -self.nn_vx_range, self.nn_vx_range)
-            self.input_normalized[4, 0] = self.remap(self.vy_dst, -self.nn_vy_range, self.nn_vy_range)
-            self.input_normalized[5, 0] = self.remap(self.y_dst, self.nn_y_min, self.nn_y_max)
-            self.rad_dst = self.remap(self.nn.cal_output(self.input_normalized)[0, 0], 0., 1., self.nn_rad_min, self.nn_rad_max)
         elif self.nn.dimIn == 5:
-            self.input_normalized[0, 0] = self.remap(self.vx, -self.nn_vx_range, self.nn_vx_range)
-            self.input_normalized[1, 0] = self.remap(self.vy, -self.nn_vy_range, self.nn_vy_range)
-            self.input_normalized[2, 0] = self.remap(self.y, self.nn_y_min, self.nn_y_max)
-            self.input_normalized[3, 0] = self.remap(self.vx_dst, -self.nn_vx_range, self.nn_vx_range)
-            self.rad_dst = self.remap(self.nn.cal_output(self.input_normalized[:5])[0, 0], 0., 1., self.nn_rad_min, self.nn_rad_max)
+            self.input_normalized[0, 0] = remap(vx, -self.nn_vx_range, self.nn_vx_range)
+            self.input_normalized[1, 0] = remap(vy, -self.nn_vy_range, self.nn_vy_range)
+            self.input_normalized[2, 0] = remap(y, self.nn_y_min, self.nn_y_max)
+            self.input_normalized[3, 0] = remap(vx_dst, -self.nn_vx_range, self.nn_vx_range)
+            self.rad_dst = remap(self.nn.cal_output(self.input_normalized[:5])[0, 0], 0., 1., self.nn_rad_min,
+                                 self.nn_rad_max)
 
-    def set_jump_dst(self, vx_dst, vy_dst, y_dst=.8):
+        elif self.nn.dimIn == 6:
+            self.input_normalized[0, 0] = remap(vx, -self.nn_vx_range, self.nn_vx_range)
+            self.input_normalized[1, 0] = remap(vy, -self.nn_vy_range, self.nn_vy_range)
+            self.input_normalized[2, 0] = remap(y, self.nn_y_min, self.nn_y_max)
+            self.input_normalized[3, 0] = remap(vx_dst, -self.nn_vx_range, self.nn_vx_range)
+            self.input_normalized[4, 0] = remap(vy_dst, -self.nn_vy_range, self.nn_vy_range)
+            self.input_normalized[5, 0] = remap(y_dst, self.nn_y_min, self.nn_y_max)
+            self.rad_dst = remap(self.nn.cal_output(self.input_normalized)[0, 0], 0., 1., self.nn_rad_min, self.nn_rad_max)
+
+    def set_jump_dst(self, vx_dst=0., vy_dst=0., y_dst=.8):
         self.vx_dst = vx_dst
         self.vy_dst = vy_dst
         self.y_dst = y_dst
@@ -701,7 +713,14 @@ class MassSpring:
                 self.y0 = 0
                 self.adjustVelocity()
                 if self.control:
-                    self.network_cal_rad()
+                    if self.nn.dimIn == 4:
+                        delta_y = .5*self.vy**2/gravity
+                        y_top = delta_y+self.y
+                        self.network_cal_rad(vx=self.vx, y=y_top,
+                                             vx_dst=self.vx_dst, y_dst=self.y_dst)
+                    elif self.nn.dimIn == 6:
+                        self.network_cal_rad(vx=self.vx, vy=self.vy, y=self.y,
+                                             vx_dst=self.vx_dst, vy_dst=self.vy_dst, y_dst=self.y_dst)
                 # print('vx: '+str(round(self.vx, 3)))
 
             # standing -> stop
@@ -768,7 +787,7 @@ def dsigmoid(s):
 
 
 def relu(a):
-    k = 1.0
+    k = .3
     kk = 0.01 * k
     a[a >= 0] *= k
     a[a < 0] *= kk
@@ -776,7 +795,7 @@ def relu(a):
 
 
 def drelu(r):
-    k = 1.0
+    k = .3
     kk = 0.01 * k
     r[r >= 0] = k
     r[r < 0] = kk
@@ -957,10 +976,10 @@ class NeuralNet:
         dimx = dimIn
         for i in range(self.numLs - 1):
             dimy = ls[i]
-            l = Layer(dimx, dimy, actFunc=1)
+            l = Layer(dimx, dimy, actFunc=2)
             dimx = dimy
             self.layers.append(l)
-        l = Layer(dimx, dimOut, actFunc=1)
+        l = Layer(dimx, dimOut, actFunc=2)
         self.layers.append(l)
 
         # Training information
@@ -1058,29 +1077,85 @@ class NeuralNet:
         for i in range(self.numLs):
             djx = self.layers[-i - 1].backpropagation(djx, alpha)
 
-    def training(self, xdata, ydata, iteration=500, alpha=0.1, detect_vg = True):
+    def training(self, xdata, ydata, iteration=500, alpha=0.1, detect_vg=True, dynamic_step=False):
         print('training...')
+        alpha_max = .6
+        alpha_min = 0.001
+        alpha_min0 = alpha_min
+        alpha_max0 = alpha_max
+        lock_max = False
+        nvb_num = 10
+        vibrate = 0
+        notvibrate = 0
+        alpha = alpha
+        alpha0 = alpha
+        data_num = xdata.shape[1]
         i = 0
         t0 = time.time()
         print('t:'+str(t0))
         while i < iteration:
+            t_i = time.time()-t0
+            left_num = iteration-i
+            left_time = int(t_i*float(left_num)/float(i+1))
+            left_sec = left_time%60
+            left_min = int(left_time/60)
+            left_hos = int(left_min/60)
+            left_min = left_min%60
             # print(xdata)
             self.yest = self.cal_output(xdata)
             self.err = self.yest - ydata
             self.j = np.sum(.5 * self.err ** 2.)
-            jj = self.j/xdata.shape[1]
+            jj = self.j/data_num
             self.js.append(self.j)
             self.backpropagation(self.err, alpha)
-            print('iteration: ' + str(i) + '/'+str(iteration)+'\tcost: '\
-                  +str(round(float(self.j), 5)) + '\t cost/samples: '+str(round(float(jj),10))\
-                  )
+            j_last = 0
+            if i > 5:
+                j_last = self.j - (self.js[i-4]-self.j)/4*left_num
+            print('iter: ' + str(i) + '/'+str(iteration)+'\tcost: '\
+                  +str(round(float(self.j), 5)) + '\tcost/n: '+str(round(float(jj),8))\
+                  +'\talpha: '+str(round(alpha,5))\
+                  +'\tremain: '+str(left_hos)+'h'+str(left_min)+'m'+str(left_sec)+'s')
+            print('\tcost end: '+str(round(j_last,3))+'\tcost/n end: '+str(round(j_last/data_num, 8))\
+                  +'\talpha max: '+str(round(alpha_max,5)) + '\talpha min: '+str(round(alpha_min,5)))
             # Detect vanishing gradient
-            if detect_vg and self.j > 100 and i > 5 and self.js[i-4] - self.js[i-1] < 0.0001:
+            if detect_vg and self.j > 50 and i > 5 and abs(self.js[i-4] - self.js[i-1]) < 0.0001 and alpha == alpha_max or self.j > 8000:# or self.j != self.j:
                 self.js = []
                 self.random_init_parameters()
                 i = 0
+                alpha = alpha0
+                vibrate = False
+                alpha_max = alpha_max0
+                alpha_min = alpha_min0
                 print(self.js)
                 print('restart...')
+            # Dynamic change step size
+            if dynamic_step and i > 15:
+                # print('alpha max: '+str(round(alpha_max,5)) + '\talpha min: '+str(round(alpha_min,5)))
+                if self.js[i - 2] < self.js[i - 1]:
+                    vibrate += 1
+                    notvibrate = 0
+
+                else:
+                    notvibrate += 1
+                    if notvibrate >= nvb_num:
+                        lock_max = False
+                        notvibrate = nvb_num
+                        vibrate = 0
+                if notvibrate == nvb_num:
+                    if self.j > 1000 and self.js[i-2] - self.js[i-1] < 10.:
+                        alpha += 0.01
+                    if self.j <= 1000 and self.js[i-2] - self.js[i-1] < .1:
+                        alpha += 0.001
+                    alpha = min(alpha, alpha_max)
+                elif self.j < 100 and self.js[i-4] - self.js[i-1] > 50. or vibrate:
+                    if not lock_max:
+                        alpha_max = alpha
+                        lock_max = True
+                        alpha_min = alpha_max * .5
+                    alpha -= 0.004
+                    alpha = max(alpha_min, alpha)
+
+
             i += 1
 
     def setInput(self, x):
@@ -1129,7 +1204,7 @@ def test_neural():
 # [vx_last, vy_last, y_last, vx_this, vy_this, y_this, angle_hit]'
 def mass_spring_sampling_data(num=10, fast_mode = False):
     def randomInit(vx_mean=0., vx_range=5., vy_mean=0., vy_range=5.,
-                   y_mean=2., y_range=1., rad_mean=-np.pi*.5, rad_range=-np.pi/3.):
+                   y_mean=3., y_range=2., rad_mean=-np.pi*.5, rad_range=-np.pi/3.):
         y = y_mean + 2. * (np.random.random() - .5) * y_range
         vx = vx_mean + 2. * (np.random.random() - .5) * vx_range
         vy = vy_mean + 2. * (np.random.random() - .5) * vy_range
@@ -1167,7 +1242,7 @@ def mass_spring_sampling_data(num=10, fast_mode = False):
             print('sample '+str(i[0]+1)+'\tvx0,vy0,y0,vx1,vy1,y1,rad: '+str(sample_display))
             i[0] += 1
             if i[0] == num:
-                name = 'mass_spring_learning_data_'+str(num/1000)+'_k'
+                name = 'mass_spring_learning_data_'+str(int(num/1000))+'_k'
                 np.save(name, data)
                 print('sample ok')
             vx, vy, y, rad = randomInit()
@@ -1189,17 +1264,10 @@ def mass_spring_sampling_data(num=10, fast_mode = False):
         pyglet.clock.schedule_interval(update,interval=1./100.,
                                        sample=sample, data=data, state=state, i=i, num=num)
         pyglet.app.run()
-# mass_spring_sampling_data(100000, fast_mode=True)
+# mass_spring_sampling_data(50000, fast_mode=True)
 
-# Redefine data
-def mass_sprint_learning_5_input():
-    def remap(x, old_min, old_max, new_min=0., new_max=1.):
-        old_mean = .5*(old_max+old_min)
-        old_range = old_max - old_min
-        new_mean = .5*(new_max+new_min)
-        new_range = new_max - new_min
-        y = (x-old_mean)*new_range/old_range + new_mean
-        return y
+# Mass spring 5 input neural network
+def mass_spring_learning_5_input():
     def normalize_data(input_data, output_data, vx_range=10., vy_range=10., y_min=.2, y_max=5.,
                        rad_min=-np.pi*5./6., rad_max=-np.pi/6.):
         input_data[0, :] = remap(input_data[0, :], -vx_range, vx_range)
@@ -1229,17 +1297,83 @@ def mass_sprint_learning_5_input():
     nn.construct_from_file('mass_spring_nn_5_inputs_20_layers_10k_samples.npz')
     nn.training(input_data, output_data, iteration=8000, alpha=0.1, detect_vg=True)
     nn.save_network_structure(name='mass_spring_nn_5_inputs_20_layers_10k_samples')
-# mass_sprint_learning_5_input()
+# mass_spring_learning_5_input()
+
+# Mass spring 4 input neural network
+# input: [vx0, y0, vx1, y1];    output:[rad]
+def mass_spring_learning_4_input():
+    def normalize_data(input_data, output_data, vx_range=10., vy_range=10., y_min=.2, y_max=5.,
+                       rad_min=-np.pi * 5. / 6., rad_max=-np.pi / 6.):
+        input_data[0, :] = remap(input_data[0, :], -vx_range, vx_range)
+        input_data[1, :] = remap(input_data[1, :], y_min, y_max)
+        input_data[2, :] = remap(input_data[2, :], -vx_range, vx_range)
+        input_data[3, :] = remap(input_data[3, :], y_min, y_max)
+        output_data[:] = remap(output_data[:], rad_min, rad_max)
+
+    data = np.load('mass_spring_learning_data_50k.npy')
+    data = np.array(data)
+    vx0 = data[0, :]
+    vy0 = data[1, :]
+    y0 = data[2, :]
+    vx1 = data[3, :]
+    vy1 = data[4, :]
+    y1 = data[5, :]
+    y0_top = y0 + .5*vy0**2/gravity
+    y1[vy1 > 0] += .5*vy1[vy1>0]**2/gravity
+    y1[vy1 <= 0] = 0.2
+    input_data = np.vstack([vx0, y0_top, vx1, y1])
+    output_data = data[-1, :]
+
+    learning_num = 50000
+    input_data = input_data[:, :learning_num]
+    output_data = output_data[:learning_num]
+    normalize_data(input_data, output_data)
+
+    nn = NeuralNet(dimIn=4, dimOut=1, ls=10*np.ones(5, dtype=int))
+    # nn.save_network_structure('mass_spring_nn_4_input_1st_loop')
+    # nn.construct_from_file('mass_spring_nn_4_input.npz')
+    nn.training(input_data, output_data, iteration=30000, alpha=0.1, detect_vg=True)
+    nn.save_network_structure(name='mass_spring_nn_4_input_1')
+# mass_spring_learning_4_input()
+
+# Mass spring 4 input neural network
+# input: [vx0, y0, vx1, y1_fuzzy]   output: [rad]
+def mass_spring_learning_4_input_fuzzy():
+    def normalize_data(input_data, output_data, vx_range=10., vy_range=10., y_min=.2, y_max=5.,
+                       rad_min=-np.pi * 5. / 6., rad_max=-np.pi / 6.):
+        input_data[0, :] = remap(input_data[0, :], -vx_range, vx_range)
+        input_data[1, :] = remap(input_data[1, :], y_min, y_max)
+        input_data[2, :] = remap(input_data[2, :], -vx_range, vx_range)
+        output_data[:] = remap(output_data[:], rad_min, rad_max)
+
+    data = np.load('mass_spring_learning_data_50k.npy')
+    data = np.array(data)
+    vx0 = data[0, :]
+    vy0 = data[1, :]
+    y0 = data[2, :]
+    vx1 = data[3, :]
+    vy1 = data[4, :]
+    y1 = data[5, :]
+    y0_top = y0 + .5*vy0**2/gravity
+    y1[vy1 > 0] = 1.
+    y1[vy1 <= 0] = 0.
+    input_data = np.vstack([vx0, y0_top, vx1, y1])
+    output_data = data[-1, :]
+
+    learning_num = 50000
+    input_data = input_data[:, :learning_num]
+    output_data = output_data[:learning_num]
+    normalize_data(input_data, output_data)
+
+    nn = NeuralNet(dimIn=4, dimOut=1, ls=10*np.ones(20, dtype=int))
+    # nn.save_network_structure('mass_spring_nn_4_input_1st_loop')
+    nn.construct_from_file('mass_spring_nn_4_input_fuzzy_1.npz')
+    nn.training(input_data, output_data, iteration=10000, alpha=0.0001, detect_vg=True, dynamic_step=True)
+    nn.save_network_structure(name='mass_spring_nn_4_input_fuzzy_2')
+mass_spring_learning_4_input_fuzzy()
 
 # Mass spring Learning from learning data
 def mass_spring_learning_6_input():
-    def remap(x, old_min, old_max, new_min=0., new_max=1.):
-        old_mean = .5*(old_max+old_min)
-        old_range = old_max - old_min
-        new_mean = .5*(new_max+new_min)
-        new_range = new_max - new_min
-        y = (x-old_mean)*new_range/old_range + new_mean
-        return y
     def normalize_data(input_data,output_data,vx_range=10., vy_range=10., y_min=.2, y_max=5., 
                        rad_min=-np.pi*5./6., rad_max=-np.pi/6.):
         input_data[0, :] = remap(input_data[0, :], -vx_range, vx_range)
@@ -1254,33 +1388,32 @@ def mass_spring_learning_6_input():
     data = np.array(data)
     # d = pd.DataFrame(data.T, columns=['vx0', 'vy0', 'y0', 'vx1', 'vy1', 'y1', 'rad'])
     # d.to_excel('mass_spring_learning_data.xls')
-    learning_num = 5000
+    learning_num = 20000
     input_data = data[:-1, :learning_num]
     output_data = data[-1, :learning_num]
     normalize_data(input_data, output_data)
 
     nn = NeuralNet(dimIn=6, dimOut=1, ls=10*np.ones(3, dtype=int))
-    # nn.construct_from_file('mass_spring_nn_5.npz')
-    nn.training(input_data, output_data, iteration=4000, alpha=0.01, detect_vg=True)
+    nn.construct_from_file('mass_spring_nn_5.npz')
+    nn.training(input_data, output_data, iteration=4000, alpha=0.1, detect_vg=True)
     nn.save_network_structure(name='mass_spring_nn_5')
-nn = mass_spring_learning_6_input()
-
+# nn = mass_spring_learning_6_input()
 
 # Mass spring let's jump
 def mass_spring_jump():
-    camera = Camera(scale=30)
-    camera.setY(4.5)
+    camera = Camera(scale=80)
+    camera.setY(1.5)
     ground = Ground(l=100, camera=camera)
 
     jumpers = []
     num = 2
     for i in range(num):
-        j = MassSpring(camera=camera)
-        j.set_jump_dst(vx_dst=.0, vy_dst=2., y_dst=.8)
+        j = MassSpring(y=3.5, camera=camera)
+        j.set_jump_dst(vx_dst=2., y_dst=1.)
         j.head.setColorH(i/float(num))
         jumpers.append(j)
-    jumpers[0].construct_neural_network_from_file('mass_spring_nn_5.npz')
-    jumpers[1].construct_neural_network_from_file('mass_spring_neural_network.npz')
+    jumpers[0].construct_neural_network_from_file('mass_spring_nn_4_input_fuzzy_deep_3.npz')
+    jumpers[1].construct_neural_network_from_file('mass_spring_nn_4_input_fuzzy_deep_2.npz')
 
     t = [0]
     @window.event
@@ -1294,20 +1427,19 @@ def mass_spring_jump():
     def update(dt, t):
         x = 0
         for j in range(len(jumpers)):
-            if jumpers[j].x > -5:
-                jumpers[j].set_jump_dst(vx_dst=-1., vy_dst=2., y_dst=.8)
+            if jumpers[j].x < 500:
+                jumpers[j].set_jump_dst(vx_dst=2., y_dst=1.)
             else:
-                jumpers[j].set_jump_dst(vx_dst=0., vy_dst=2., y_dst=.8)
-            jumpers[j].update(dt=0.01, control=True)
-            jumpers[j].update()
-            print('jumper '+str(j)+' x:'+str(round(jumpers[j].x,3)))
+                jumpers[j].set_jump_dst(vx_dst=0., y_dst=1.)
+            jumpers[j].update(dt=dt, control=True)
+            print('jumper '+str(j)+'\tx: '+str(round(jumpers[j].x,3))+'\tvx: '+str(round(jumpers[j].vx,3)))
             x += jumpers[j].x
         x /= len(jumpers)
-        # camera.setX(x)
+        camera.setX(jumpers[1].x)
 
-    pyglet.clock.schedule_interval(update,t=t,interval=1/100)
+    pyglet.clock.schedule_interval(update, t=t, interval=1/100)
     pyglet.app.run()
-mass_spring_jump()
+# mass_spring_jump()
 
 
 
